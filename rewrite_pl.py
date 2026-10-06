@@ -1,0 +1,299 @@
+import os
+
+filepath = r"D:\deep clothes\client\src\pages\admin\AdminProfitLoss.jsx"
+
+content = r'''import React, { useState, useEffect } from 'react';
+import api from '../../services/api';
+import toast from 'react-hot-toast';
+import { HiOutlineChartBar, HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineCurrencyRupee, HiOutlineCalendar } from 'react-icons/hi';
+import CustomDatePicker from '../../components/shared/CustomDatePicker';
+
+const AdminProfitLoss = () => {
+  const [orders, setOrders] = useState([]);
+  const [inventory, setInventory] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [ordersRes, invRes] = await Promise.all([
+        api.get('/orders'),
+        api.get('/inventory')
+      ]);
+      
+      if (ordersRes.data.success) setOrders(ordersRes.data.data);
+      if (invRes.data.success) setInventory(invRes.data.data);
+    } catch (err) {
+      toast.error('Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Filter orders by date
+  const filteredOrders = orders.filter(order => {
+    if (!startDate && !endDate) return true;
+    const oDate = new Date(order.orderDate);
+    oDate.setHours(0, 0, 0, 0);
+    
+    let isValid = true;
+    if (startDate) {
+      const sDate = new Date(startDate);
+      sDate.setHours(0, 0, 0, 0);
+      if (oDate < sDate) isValid = false;
+    }
+    if (endDate) {
+      const eDate = new Date(endDate);
+      eDate.setHours(23, 59, 59, 999);
+      if (oDate > eDate) isValid = false;
+    }
+    return isValid;
+  });
+
+  // Create inventory lookup map: uniqueCode -> cost price
+  const invMap = {};
+  inventory.forEach(inv => {
+    invMap[inv.uniqueCode?.toUpperCase()] = parseFloat(inv.price) || 0;
+  });
+
+  // Calculate P&L metrics
+  let totalRevenue = 0;
+  let totalCost = 0;
+  
+  const categoryMetrics = {
+    'Shirt': { qty: 0, revenue: 0, cost: 0 },
+    'T-Shirt': { qty: 0, revenue: 0, cost: 0 },
+    'Pant': { qty: 0, revenue: 0, cost: 0 }
+  };
+
+  const itemMetrics = {}; // Group by uniqueCode for detailed table
+
+  filteredOrders.forEach(order => {
+    const items = typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []);
+    
+    items.forEach(item => {
+      const uCode = item.uniqueCode?.toUpperCase() || 'UNKNOWN';
+      const cat = item.category || 'Other';
+      const qty = parseFloat(item.qty) || 0;
+      const revenue = parseFloat(item.amount) || 0;
+      
+      // Look up cost price
+      const unitCost = invMap[uCode] || 0;
+      const totalItemCost = unitCost * qty;
+
+      totalRevenue += revenue;
+      totalCost += totalItemCost;
+
+      // Update Category Metrics
+      if (!categoryMetrics[cat]) {
+        categoryMetrics[cat] = { qty: 0, revenue: 0, cost: 0 };
+      }
+      categoryMetrics[cat].qty += qty;
+      categoryMetrics[cat].revenue += revenue;
+      categoryMetrics[cat].cost += totalItemCost;
+
+      // Update Item Details
+      if (!itemMetrics[uCode]) {
+        itemMetrics[uCode] = { category: cat, qty: 0, revenue: 0, cost: 0, unitCost };
+      }
+      itemMetrics[uCode].qty += qty;
+      itemMetrics[uCode].revenue += revenue;
+      itemMetrics[uCode].cost += totalItemCost;
+    });
+  });
+
+  const totalProfit = totalRevenue - totalCost;
+  const marginPercent = totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(1) : 0;
+
+  return (
+    <div className="space-y-8 animate-fade-in">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-light tracking-widest uppercase text-gradient">Profit & Loss</h1>
+          <p className="text-[var(--text-secondary)] mt-1">Analyze your sales performance and margins</p>
+        </div>
+      </div>
+
+      {/* Date Filter */}
+      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] p-4 rounded-xl shadow-[var(--shadow-card)] flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2 text-luxury-gold">
+          <HiOutlineCalendar className="w-5 h-5" />
+          <span className="text-sm uppercase tracking-widest font-medium">Filter By Order Date:</span>
+        </div>
+        <div className="w-full md:w-48">
+          <CustomDatePicker 
+            label="Start Date"
+            value={startDate}
+            onChange={(date) => setStartDate(date)}
+          />
+        </div>
+        <div className="text-[var(--text-muted)]">to</div>
+        <div className="w-full md:w-48">
+          <CustomDatePicker 
+            label="End Date"
+            value={endDate}
+            onChange={(date) => setEndDate(date)}
+          />
+        </div>
+        <button 
+          onClick={() => { setStartDate(''); setEndDate(''); }}
+          className="text-xs uppercase tracking-widest text-[var(--text-muted)] hover:text-luxury-gold transition-colors ml-auto"
+        >
+          Clear Filters
+        </button>
+      </div>
+
+      {/* Top Level Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-[var(--bg-card)] border border-[var(--border-color)] p-6 rounded-2xl shadow-[var(--shadow-card)] relative overflow-hidden group hover:border-luxury-gold/50 transition-colors">
+          <div className="absolute -right-6 -top-6 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl group-hover:bg-blue-500/20 transition-colors"></div>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-[var(--text-secondary)] mb-1">Total Revenue</p>
+              <h3 className="text-3xl font-light text-[var(--text-primary)]">?{totalRevenue.toFixed(2)}</h3>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
+              <HiOutlineCurrencyRupee className="w-6 h-6 text-blue-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-[var(--bg-card)] border border-[var(--border-color)] p-6 rounded-2xl shadow-[var(--shadow-card)] relative overflow-hidden group hover:border-luxury-gold/50 transition-colors">
+          <div className="absolute -right-6 -top-6 w-24 h-24 bg-red-500/10 rounded-full blur-2xl group-hover:bg-red-500/20 transition-colors"></div>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-[var(--text-secondary)] mb-1">Total Cost</p>
+              <h3 className="text-3xl font-light text-[var(--text-primary)]">?{totalCost.toFixed(2)}</h3>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center border border-red-500/20">
+              <HiOutlineChartBar className="w-6 h-6 text-red-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className={g-[var(--bg-card)] border  p-6 rounded-2xl shadow-[var(--shadow-card)] relative overflow-hidden group hover:border-luxury-gold/50 transition-colors}>
+          <div className={bsolute -right-6 -top-6 w-24 h-24  rounded-full blur-2xl transition-colors}></div>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-[var(--text-secondary)] mb-1">Net Profit / Loss</p>
+              <h3 className={	ext-3xl font-light }>
+                {totalProfit >= 0 ? '+' : '-'}?{Math.abs(totalProfit).toFixed(2)}
+              </h3>
+              <p className="text-xs text-[var(--text-muted)] mt-2">Margin: {marginPercent}%</p>
+            </div>
+            <div className={w-12 h-12 rounded-xl flex items-center justify-center border }>
+              {totalProfit >= 0 ? <HiOutlineTrendingUp className="w-6 h-6" /> : <HiOutlineTrendingDown className="w-6 h-6" />}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Category Breakdown */}
+      <div>
+        <h2 className="text-sm font-medium tracking-widest uppercase text-luxury-gold mb-4 border-b border-[var(--border-color)] pb-2">Category Breakdown</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {Object.entries(categoryMetrics).map(([cat, data]) => {
+            const catProfit = data.revenue - data.cost;
+            const catMargin = data.revenue > 0 ? ((catProfit / data.revenue) * 100).toFixed(1) : 0;
+            return (
+              <div key={cat} className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl p-5 hover:border-luxury-gold/50 transition-colors">
+                <div className="flex justify-between items-center mb-4">
+                  <span className="px-3 py-1 bg-luxury-gold/10 border border-luxury-gold/30 rounded-md text-xs font-medium tracking-wider uppercase text-luxury-gold">{cat}</span>
+                  <span className="text-xs text-[var(--text-secondary)]">Sold: {data.qty}</span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[var(--text-muted)]">Revenue:</span>
+                    <span className="text-[var(--text-primary)]">?{data.revenue.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[var(--text-muted)]">Cost:</span>
+                    <span className="text-[var(--text-primary)]">?{data.cost.toFixed(2)}</span>
+                  </div>
+                  <div className="pt-2 border-t border-[var(--border-color)] flex justify-between font-medium">
+                    <span className="text-[var(--text-primary)]">Profit:</span>
+                    <span className={catProfit >= 0 ? 'text-green-400' : 'text-red-400'}>
+                      {catProfit >= 0 ? '+' : ''}?{catProfit.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Detailed Table */}
+      <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl overflow-hidden shadow-[var(--shadow-card)] mt-8">
+        <div className="p-4 border-b border-[var(--border-color)]">
+          <h2 className="text-sm font-medium tracking-widest uppercase text-[var(--text-secondary)]">Item-wise Profit & Loss</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-[var(--border-color)] bg-[var(--bg-card)]/50">
+                <th className="px-6 py-4 font-medium tracking-wider text-xs uppercase text-[var(--text-secondary)]">Code</th>
+                <th className="px-6 py-4 font-medium tracking-wider text-xs uppercase text-[var(--text-secondary)]">Category</th>
+                <th className="px-6 py-4 font-medium tracking-wider text-xs uppercase text-[var(--text-secondary)] text-right">Qty Sold</th>
+                <th className="px-6 py-4 font-medium tracking-wider text-xs uppercase text-[var(--text-secondary)] text-right">Unit Cost</th>
+                <th className="px-6 py-4 font-medium tracking-wider text-xs uppercase text-[var(--text-secondary)] text-right">Total Cost</th>
+                <th className="px-6 py-4 font-medium tracking-wider text-xs uppercase text-[var(--text-secondary)] text-right">Revenue</th>
+                <th className="px-6 py-4 font-medium tracking-wider text-xs uppercase text-[var(--text-secondary)] text-right">Profit / Loss</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-color)]">
+              {loading ? (
+                <tr>
+                  <td colSpan="7" className="px-6 py-8 text-center text-[var(--text-muted)] tracking-widest uppercase">
+                    Loading data...
+                  </td>
+                </tr>
+              ) : Object.keys(itemMetrics).length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="px-6 py-12 text-center text-[var(--text-muted)]">
+                    No sales data found for the selected period.
+                  </td>
+                </tr>
+              ) : (
+                Object.entries(itemMetrics).map(([code, data]) => {
+                  const profit = data.revenue - data.cost;
+                  return (
+                    <tr key={code} className="hover:bg-[var(--bg-card-hover)] transition-colors">
+                      <td className="px-6 py-4 font-mono text-[var(--text-primary)]">{code}</td>
+                      <td className="px-6 py-4">
+                        <span className="px-2 py-1 bg-luxury-gold/10 border border-luxury-gold/30 rounded-md text-[10px] font-medium tracking-wider uppercase text-luxury-gold">
+                          {data.category}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right text-[var(--text-primary)]">{data.qty}</td>
+                      <td className="px-6 py-4 text-right text-[var(--text-secondary)]">?{data.unitCost.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right text-[var(--text-secondary)]">?{data.cost.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right text-[var(--text-primary)]">?{data.revenue.toFixed(2)}</td>
+                      <td className={px-6 py-4 text-right font-medium }>
+                        {profit >= 0 ? '+' : ''}?{profit.toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AdminProfitLoss;
+'''
+
+with open(filepath, 'w', encoding='utf-8') as f:
+    f.write(content)
+print("Rewritten AdminProfitLoss.jsx successfully")
